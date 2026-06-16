@@ -1,0 +1,188 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId}
+// Fields:
+//   - uid: string (required)
+//   - email: string (required, email format)
+//   - displayName: string (optional)
+//   - role: string (enum: ['host', 'admin'])
+//
+// Collection: kits
+// Document ID: {kitId}
+// Fields:
+//   - ownerId: string (required)
+//   - title: string (required)
+//   - description: string (optional)
+//   - questions: list (required)
+//   - createdAt: timestamp (required)
+//
+// Collection: games
+// Document ID: {gameCode} (5-digit string)
+// Fields:
+//   - gameCode: string (required)
+//   - hostId: string (required)
+//   - kitId: string (required)
+//   - status: string (enum: ['lobby', 'active', 'finished'])
+//   - settings: map (optional)
+//   - totalWealth: number (optional)
+//   - createdAt: timestamp (required)
+//
+// Collection: games/{gameCode}/players
+// Document ID: {playerId}
+// Fields:
+//   - nickname: string (required, 1-20 chars)
+//   - gameCode: string (required)
+//   - joinedAt: timestamp (required)
+//
+// Collection: history
+// Document ID: {historyId}
+// Fields:
+//   - gameCode: string
+//   - hostId: string
+//   - kitId: string
+//   - winnerNickname: string
+//   - totalWealth: number
+//   - totalCorrectAnswers: number
+//   - playerCount: number
+//   - endedAt: timestamp
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        ('email' in request.auth.token && request.auth.token.email == "supersauce2.0@hotmail.com") ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') in ['admin', 'owner'])
+      );
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid is string &&
+             data.email is string && isValidEmail(data.email) &&
+             (!('role' in data) || data.role in ['host', 'admin', 'teacher', 'student', 'dual', 'owner']) &&
+             (!('displayName' in data) || data.displayName is string) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+    
+    function isValidProfile(data) {
+      return (!('face' in data) || data.face is string) &&
+             (!('nickname' in data) || data.nickname is string);
+    }
+    
+    function isValidKit(data) {
+      return data.keys().hasAll(['ownerId', 'title', 'questions', 'createdAt']) &&
+             data.ownerId is string &&
+             data.title is string && data.title.size() > 0 &&
+             data.questions is list &&
+             data.createdAt is timestamp &&
+             (!('isPublic' in data) || data.isPublic is bool);
+    }
+
+    function isValidGame(data) {
+      return data.keys().hasAll(['gameCode', 'hostId', 'kitId', 'status', 'createdAt']) &&
+             data.gameCode is string && data.gameCode.size() == 5 &&
+             data.hostId is string &&
+             data.kitId is string &&
+             data.status in ['lobby', 'active', 'finished'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidPlayer(data) {
+      return data.keys().hasAll(['nickname', 'gameCode', 'joinedAt']) &&
+             data.nickname is string && data.nickname.size() >= 1 && data.nickname.size() <= 20 &&
+             data.gameCode is string && data.gameCode.size() == 5 &&
+             data.joinedAt is timestamp &&
+             (!('face' in data) || data.face is string);
+    }
+    
+    function isValidHistory(data) {
+      return data.keys().hasAll(['gameCode', 'hostId', 'kitId', 'winnerNickname', 'totalWealth', 'totalCorrectAnswers', 'playerCount', 'endedAt']) &&
+             data.hostId is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (
+        isAdmin() || 
+        (isOwner(userId) && (!('role' in resource.data) || request.resource.data.role == resource.data.role))
+      );
+                    
+      match /profile/{docId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    match /kits/{kitId} {
+      allow read: if isAuthenticated() && (resource.data.ownerId == request.auth.uid || resource.data.isPublic == true || isAdmin());
+      allow create: if isAuthenticated() && isValidKit(request.resource.data) && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isAuthenticated() && isValidKit(request.resource.data) && resource.data.ownerId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /history/{historyId} {
+      allow read: if isAuthenticated() && resource.data.hostId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidHistory(request.resource.data) && request.resource.data.hostId == request.auth.uid;
+      allow update: if false; // History shouldn't be mutable
+      allow delete: if false;
+    }
+
+    match /games/{gameCode} {
+      allow read: if true; // Publicly readable so players can join
+      allow create: if isAuthenticated() && isValidGame(request.resource.data) && request.resource.data.hostId == request.auth.uid;
+      allow update: if (isAuthenticated() && isValidGame(request.resource.data) && resource.data.hostId == request.auth.uid) || true; // Allow anonymous updates for player answering
+      allow delete: if isAuthenticated() && resource.data.hostId == request.auth.uid;
+
+      match /players/{playerId} {
+        allow read: if true; // Players in the lobby need to see each other
+        allow create: if isValidPlayer(request.resource.data); // No auth required to join
+        allow update: if isValidPlayer(request.resource.data); // Allow players to update their scores/streaks
+        allow delete: if false;
+      }
+    }
+
+    match /game_requests/{document=**} {
+      allow read: if isAdmin();
+      allow create: if true; // Anyone can submit requests
+    }
+
+    match /feedback/{document=**} {
+      allow read: if isAdmin();
+      allow create: if true; // Anyone can submit feedback
+    }
+
+    match /settings/{document=**} {
+      allow read: if true; // Anyone can read settings
+      allow write: if isAdmin(); // Only admins can update settings
+    }
+  }
+}

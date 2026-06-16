@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A host user in the StoneKit platform.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique identifier for the user." },
+        "email": { "type": "string", "format": "email", "description": "The user's email address." },
+        "displayName": { "type": "string", "description": "The user's display name." },
+        "role": { "type": "string", "enum": ["host", "admin"], "description": "The user's role." }
+      },
+      "required": ["uid", "email"]
+    },
+    "Kit": {
+      "title": "Kit",
+      "description": "A game template containing questions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" },
+              "answers": { "type": "array", "items": { "type": "string" } },
+              "correctIndex": { "type": "number" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "isPublic": { "type": "boolean", "description": "Whether the kit is published to the community gallery." }
+      },
+      "required": ["ownerId", "title", "questions", "createdAt"]
+    },
+    "Game": {
+      "title": "Game",
+      "description": "A live game session.",
+      "type": "object",
+      "properties": {
+        "gameCode": { "type": "string" },
+        "hostId": { "type": "string" },
+        "kitId": { "type": "string" },
+        "status": { "type": "string", "enum": ["lobby", "active", "finished"] },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "randomNicknames": { "type": "boolean" },
+            "timer": { "type": "number" }
+          }
+        },
+        "totalWealth": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["gameCode", "hostId", "kitId", "status", "createdAt"]
+    },
+    "Player": {
+      "title": "Player",
+      "description": "A player who has joined a game session.",
+      "type": "object",
+      "properties": {
+        "nickname": { "type": "string", "description": "The player's chosen nickname." },
+        "gameCode": { "type": "string", "description": "The code of the game they joined." },
+        "joinedAt": { "type": "string", "format": "date-time", "description": "When the player joined." }
+      },
+      "required": ["nickname", "gameCode", "joinedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles for hosts."
+    },
+    "/kits/{kitId}": {
+      "schema": "Kit",
+      "description": "Game templates created by hosts."
+    },
+    "/games/{gameCode}": {
+      "schema": "Game",
+      "description": "Active and past game sessions, keyed by game code."
+    },
+    "/games/{gameCode}/players/{playerId}": {
+      "schema": "Player",
+      "description": "Players currently in a specific game session."
+    }
+  }
+}
